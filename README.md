@@ -345,7 +345,7 @@ Finished: SUCCESS
 
 Open your browser and go to your Azure URL:
 ```
-https://your-app-name.azurewebsites.net
+devops-iife-cycle-by-harshvardhansinh-aqhmewb0czgwbph9.centralindia-01.azurewebsites.net
 ```
 
 You should see your `index.html` live on the internet. 🎉
