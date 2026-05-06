@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DevOps Lifecycle — Infinity Loop using Jenkins</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════
+   RESET & ROOT
+═══════════════════════════════ */
+:root {
+  --cyan:   #00f5ff;
+  --green:  #00ff88;
+  --purple: #b96aff;
+  --orange: #ff7c2a;
+  --pink:   #ff2d78;
+  --yellow: #ffe843;
+  --bg:     #040a14;
+  --panel:  rgba(0,20,40,0.85);
+}
+*  { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html, body {
+  width:100%; height:100%;
+  background:var(--bg);
+  overflow:hidden;
+  font-family:'Share Tech Mono', monospace;
+}
+body {
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  min-height:100vh; min-height:100svh;
+}
+
+/* ═══════════════════════════════
+   BACKGROUND LAYERS
+═══════════════════════════════ */
+.stars { position:fixed; inset:0; pointer-events:none; z-index:0; }
+.star  {
+  position:absolute; border-radius:50%; background:#fff;
+  animation:twinkle var(--d,3s) ease-in-out infinite alternate;
+}
+@keyframes twinkle { from{opacity:.1} to{opacity:.75} }
+
+.grid {
+  position:fixed; inset:0; pointer-events:none; z-index:0;
+  background-image:
+    linear-gradient(rgba(0,245,255,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,245,255,.03) 1px, transparent 1px);
+  background-size:60px 60px;
+  animation:gridDrift 22s linear infinite;
+}
+@keyframes gridDrift { from{background-position:0 0} to{background-position:60px 60px} }
+
+.scanlines {
+  position:fixed; inset:0; pointer-events:none; z-index:200;
+  background:repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,.03) 2px, rgba(0,0,0,.03) 4px);
+}
+
+/* ═══════════════════════════════
+   SCENE WRAPPER — SCALES TO FIT
+═══════════════════════════════ */
+.scene-wrapper {
+  position:relative; z-index:1;
+  /* JS writes transform:scale() here */
+  transform-origin:center center;
+}
+
+/* ═══════════════════════════════
+   SCENE — fixed 640×800 canvas
+   (extra vertical room for labels/hud)
+═══════════════════════════════ */
+.scene {
+  position:relative;
+  width:640px; height:640px;
+}
+.svg-canvas { position:absolute; inset:0; width:100%; height:100%; }
+
+/* ── rings ── */
+.ring-outer {
+  position:absolute; inset:20px; border-radius:50%;
+  border:1px solid rgba(0,245,255,.15);
+  animation:spin 42s linear infinite;
+}
+.ring-outer::after {
+  content:''; position:absolute; inset:-6px; border-radius:50%;
+  border:1px dashed rgba(0,245,255,.08);
+  animation:spin 32s linear infinite reverse;
+}
+.ring-mid {
+  position:absolute; inset:80px; border-radius:50%;
+  border:1.5px solid rgba(185,106,255,.18);
+  animation:spin 20s linear infinite reverse;
+}
+@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+/* ── nodes ── */
+.node {
+  position:absolute; width:96px; height:96px;
+  border-radius:50%; cursor:pointer;
+  transition:transform .25s, filter .25s;
+  z-index:10;
+}
+.node:hover  { transform:scale(1.22); filter:brightness(1.4); }
+.node:active { transform:scale(1.15); filter:brightness(1.6); }
+.node.active-node { transform:scale(1.28); filter:brightness(1.6); z-index:20; }
+
+.node-inner {
+  position:relative; width:100%; height:100%;
+  border-radius:50%;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+  background:var(--panel);
+  border:2px solid var(--nc,#00f5ff);
+  box-shadow:0 0 16px var(--nc,#00f5ff), inset 0 0 18px rgba(0,0,0,.6);
+  animation:nodePulse var(--np,3s) ease-in-out infinite;
+}
+@keyframes nodePulse {
+  0%,100%{ box-shadow:0 0 16px var(--nc,#00f5ff),inset 0 0 18px rgba(0,0,0,.6) }
+  50%    { box-shadow:0 0 36px var(--nc,#00f5ff),inset 0 0 18px rgba(0,0,0,.6) }
+}
+.node-inner::after {
+  content:''; position:absolute; inset:-8px; border-radius:50%;
+  border:1px solid var(--nc,#00f5ff); opacity:.22;
+  animation:ripple 2.6s ease-out infinite var(--nd,0s);
+}
+@keyframes ripple {
+  0%  { transform:scale(.88); opacity:.38 }
+  100%{ transform:scale(1.45); opacity:0  }
+}
+
+.node-icon  { font-size:24px; line-height:1; }
+.node-label { font-family:'Orbitron',sans-serif; font-size:9px; font-weight:700; letter-spacing:.08em; color:var(--nc,#00f5ff); text-transform:uppercase; }
+.node-sub   { font-size:7px; color:rgba(255,255,255,.4); letter-spacing:.06em; }
+.node-hint  { font-size:6px; color:rgba(255,255,255,.22); letter-spacing:.04em; }
+
+/* node positions (centre=320,320 radius=240) */
+.n-plan    { --nc:var(--cyan);   --np:2.8s; --nd:0s;   top:calc(320px - 240px - 48px); left:calc(320px - 48px); }
+.n-code    { --nc:var(--green);  --np:3.1s; --nd:.4s;  top:calc(320px - 120px - 48px); left:calc(320px + 208px - 48px); }
+.n-build   { --nc:var(--orange); --np:2.6s; --nd:.8s;  top:calc(320px + 120px - 48px); left:calc(320px + 208px - 48px); }
+.n-test    { --nc:var(--yellow); --np:3.3s; --nd:1.2s; top:calc(320px + 240px - 48px); left:calc(320px - 48px); }
+.n-deploy  { --nc:var(--purple); --np:2.9s; --nd:1.6s; top:calc(320px + 120px - 48px); left:calc(320px - 208px - 48px); }
+.n-monitor { --nc:var(--pink);   --np:3.5s; --nd:2s;   top:calc(320px - 120px - 48px); left:calc(320px - 208px - 48px); }
+
+/* ── core ── */
+.core {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:120px; height:120px; z-index:12; cursor:pointer;
+}
+.core:hover .core-inner { filter:brightness(1.4); }
+.core:active .core-inner { filter:brightness(1.7); }
+.core-ring {
+  position:absolute; inset:0; border-radius:50%;
+  border:2px solid rgba(0,245,255,.32);
+  animation:spin 6s linear infinite;
+}
+.core-ring:nth-child(2){ inset:8px; border-color:rgba(185,106,255,.28); animation-duration:4s; animation-direction:reverse; }
+.core-inner {
+  position:absolute; inset:16px; border-radius:50%;
+  background:radial-gradient(circle at 40% 35%, rgba(0,245,255,.22), rgba(185,106,255,.18), rgba(4,10,20,.9));
+  border:1.5px solid rgba(0,245,255,.48);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  box-shadow:0 0 40px rgba(0,245,255,.28), inset 0 0 20px rgba(0,0,0,.7);
+  transition:filter .2s;
+}
+.core-title { font-family:'Orbitron',sans-serif; font-size:13px; font-weight:900; color:var(--cyan); text-shadow:0 0 12px var(--cyan); letter-spacing:.1em; }
+.core-sub   { font-size:7px; color:rgba(255,255,255,.38); letter-spacing:.12em; margin-top:2px; }
+.core-hint  { font-size:6px; color:rgba(0,245,255,.3); letter-spacing:.08em; margin-top:3px; }
+
+/* ── hud & labels ── */
+.top-label {
+  position:absolute; top:-50px; left:0; right:0; text-align:center;
+  font-family:'Orbitron',sans-serif; font-size:20px; font-weight:900;
+  letter-spacing:.22em; color:#fff;
+  text-shadow:0 0 24px var(--cyan),0 0 60px rgba(0,245,255,.28);
+  white-space:nowrap;
+}
+.top-label span { color:var(--cyan); }
+
+.hud {
+  position:absolute; bottom:-52px; left:0; right:0;
+  display:flex; justify-content:center; flex-wrap:wrap; gap:14px;
+  font-size:10px; letter-spacing:.1em; color:rgba(0,245,255,.4);
+}
+.hud-dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+
+/* corners */
+.corner { position:absolute; width:40px; height:40px; z-index:5; }
+.corner::before,.corner::after { content:''; position:absolute; background:var(--cyan); }
+.corner::before { width:100%; height:2px; top:0; left:0; opacity:.4; }
+.corner::after  { width:2px; height:100%; top:0; left:0; opacity:.4; }
+.c-tl{top:-80px;left:-30px} .c-tr{top:-80px;right:-30px;transform:scaleX(-1)}
+.c-bl{bottom:-60px;left:-30px;transform:scaleY(-1)} .c-br{bottom:-60px;right:-30px;transform:scale(-1)}
+
+/* ── cursor (desktop only) ── */
+#cursorCanvas { position:fixed; inset:0; pointer-events:none; z-index:2; }
+.cursor-dot  {
+  position:fixed; width:10px; height:10px; border-radius:50%;
+  background:var(--cyan); box-shadow:0 0 12px var(--cyan),0 0 24px var(--cyan);
+  pointer-events:none; z-index:1000; transform:translate(-50%,-50%);
+  display:none;
+}
+.cursor-ring {
+  position:fixed; width:36px; height:36px; border-radius:50%;
+  border:1.5px solid rgba(0,245,255,.5); pointer-events:none;
+  z-index:999; transform:translate(-50%,-50%);
+  display:none;
+}
+body.has-mouse { cursor:none; }
+body.has-mouse .cursor-dot,
+body.has-mouse .cursor-ring { display:block; }
+
+/* key hint */
+.key-hint {
+  position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+  font-size:9px; letter-spacing:.12em; color:rgba(255,255,255,.18);
+  z-index:400; pointer-events:none; white-space:nowrap;
+}
+
+/* ═══════════════════════════════
+   MODAL
+═══════════════════════════════ */
+.modal-overlay {
+  position:fixed; inset:0; z-index:500;
+  background:rgba(2,6,18,.8);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+  display:flex; align-items:center; justify-content:center;
+  padding:16px;
+  opacity:0; pointer-events:none;
+  transition:opacity .32s;
+}
+.modal-overlay.open { opacity:1; pointer-events:all; }
+
+.modal {
+  position:relative;
+  width:100%; max-width:700px;
+  max-height:90vh; max-height:90svh;
+  background:rgba(3,12,26,.97);
+  border:1.5px solid var(--mc,#00f5ff);
+  border-radius:18px;
+  box-shadow:0 0 70px var(--mc,#00f5ff), inset 0 0 50px rgba(0,0,0,.6);
+  overflow:hidden;
+  display:flex; flex-direction:column;
+  transform:scale(.88) translateY(20px);
+  transition:transform .38s cubic-bezier(.16,1,.3,1);
+}
+.modal-overlay.open .modal { transform:scale(1) translateY(0); }
+
+.modal::before,.modal::after {
+  content:''; position:absolute; width:28px; height:28px;
+  border-color:var(--mc,#00f5ff); border-style:solid; opacity:.5; z-index:1;
+  pointer-events:none;
+}
+.modal::before { top:10px; left:10px; border-width:2px 0 0 2px; border-radius:4px 0 0 0; }
+.modal::after  { bottom:10px; right:10px; border-width:0 2px 2px 0; border-radius:0 0 4px 0; }
+
+.modal-header {
+  flex-shrink:0;
+  display:flex; align-items:center; gap:16px;
+  padding:20px 24px 16px;
+  border-bottom:1px solid rgba(255,255,255,.06);
+  background:linear-gradient(135deg, rgba(0,245,255,.05) 0%, transparent 55%);
+  position:relative;
+}
+.modal-icon    { font-size:34px; line-height:1; filter:drop-shadow(0 0 10px var(--mc,#00f5ff)); flex-shrink:0; }
+.modal-titles  { min-width:0; }
+.modal-phase   { font-size:9px; letter-spacing:.16em; color:rgba(255,255,255,.3); text-transform:uppercase; margin-bottom:4px; }
+.modal-name    { font-family:'Orbitron',sans-serif; font-size:22px; font-weight:900; color:var(--mc,#00f5ff); text-shadow:0 0 18px var(--mc,#00f5ff); letter-spacing:.1em; }
+.modal-tagline { font-size:11px; color:rgba(255,255,255,.42); margin-top:3px; letter-spacing:.05em; }
+
+.modal-close {
+  position:absolute; top:16px; right:18px;
+  width:34px; height:34px; border-radius:50%;
+  border:1.5px solid rgba(255,255,255,.18);
+  background:rgba(255,255,255,.04);
+  color:rgba(255,255,255,.55); font-size:16px; line-height:34px; text-align:center;
+  cursor:pointer; transition:all .2s; flex-shrink:0;
+}
+.modal-close:hover  { background:rgba(255,60,60,.14); border-color:rgba(255,60,60,.45); color:#ff6060; transform:rotate(90deg); }
+.modal-close:active { transform:rotate(90deg) scale(.9); }
+
+.modal-body {
+  flex:1 1 auto;
+  padding:22px 24px 26px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+}
+.modal-body::-webkit-scrollbar { width:4px; }
+.modal-body::-webkit-scrollbar-thumb { background:var(--mc,#00f5ff); border-radius:4px; }
+
+.modal-summary {
+  font-size:12px; line-height:1.8; color:rgba(255,255,255,.6);
+  margin-bottom:22px; padding:13px 16px;
+  background:rgba(255,255,255,.025);
+  border-left:3px solid var(--mc,#00f5ff);
+  border-radius:0 10px 10px 0;
+}
+
+.modal-section-title {
+  font-family:'Orbitron',sans-serif; font-size:10px; font-weight:700;
+  color:var(--mc,#00f5ff); letter-spacing:.18em; text-transform:uppercase;
+  margin:22px 0 12px; display:flex; align-items:center; gap:10px;
+}
+.modal-section-title::after { content:''; flex:1; height:1px; background:linear-gradient(90deg,var(--mc,#00f5ff),transparent); opacity:.28; }
+
+/* cards */
+.cards-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.card {
+  background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.07);
+  border-radius:12px; padding:14px 14px; transition:all .2s;
+}
+.card:hover { background:rgba(255,255,255,.07); border-color:rgba(255,255,255,.14); transform:translateY(-2px); }
+.card-icon  { font-size:18px; margin-bottom:6px; }
+.card-title { font-family:'Orbitron',sans-serif; font-size:9px; font-weight:700; color:var(--mc,#00f5ff); letter-spacing:.08em; margin-bottom:5px; }
+.card-desc  { font-size:10px; line-height:1.65; color:rgba(255,255,255,.48); }
+
+/* tools */
+.tools-row { display:flex; flex-wrap:wrap; gap:7px; }
+.tool-pill {
+  padding:5px 12px; border-radius:20px; font-size:10px; letter-spacing:.05em;
+  border:1px solid rgba(255,255,255,.1); background:rgba(255,255,255,.04); color:rgba(255,255,255,.6);
+  transition:all .2s;
+}
+.tool-pill:hover { background:rgba(255,255,255,.09); border-color:var(--mc,#00f5ff); color:var(--mc,#00f5ff); }
+
+/* best practices */
+.bp-list { list-style:none; display:flex; flex-direction:column; gap:9px; }
+.bp-list li { font-size:10.5px; line-height:1.65; color:rgba(255,255,255,.53); padding-left:18px; position:relative; }
+.bp-list li::before { content:'▸'; position:absolute; left:0; color:var(--mc,#00f5ff); opacity:.65; }
+
+/* kpis */
+.kpi-strip { display:flex; gap:10px; flex-wrap:wrap; }
+.kpi { flex:1; min-width:75px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07); border-radius:12px; padding:10px 12px; text-align:center; }
+.kpi-val { font-family:'Orbitron',sans-serif; font-size:15px; font-weight:900; color:var(--mc,#00f5ff); }
+.kpi-lbl { font-size:8px; color:rgba(255,255,255,.32); letter-spacing:.08em; margin-top:4px; }
+
+/* footer */
+.modal-footer {
+  margin-top:22px; padding-top:16px;
+  border-top:1px solid rgba(255,255,255,.055);
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;
+}
+.badge { padding:5px 14px; border-radius:20px; font-size:9px; letter-spacing:.1em; border:1px solid var(--mc,#00f5ff); color:var(--mc,#00f5ff); background:rgba(0,0,0,.3); }
+.phase-nav { display:flex; gap:8px; }
+.phase-btn {
+  padding:7px 16px; border-radius:8px; font-size:9px; letter-spacing:.08em; font-family:'Orbitron',sans-serif;
+  border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.04); color:rgba(255,255,255,.52);
+  cursor:pointer; transition:all .2s;
+}
+.phase-btn:hover  { background:rgba(255,255,255,.1); color:#fff; border-color:rgba(255,255,255,.3); }
+.phase-btn:active { transform:scale(.96); }
+
+/* swipe hint (mobile) */
+.swipe-hint {
+  display:none;
+  text-align:center; font-size:9px; letter-spacing:.1em; color:rgba(255,255,255,.2);
+  margin-top:12px; padding-bottom:4px;
+}
+
+/* ═══════════════════════════════
+   RESPONSIVE BREAKPOINTS
+═══════════════════════════════ */
+
+/* Tablet / medium — let JS handle scene scale, adjust modal */
+@media (max-width: 768px) {
+  .key-hint { display:none; }
+  .modal-name  { font-size:18px; }
+  .modal-icon  { font-size:28px; }
+  .modal-body  { padding:16px 18px 22px; }
+  .modal-summary { font-size:11.5px; }
+  .hud { gap:10px; font-size:9px; }
+  .swipe-hint { display:block; }
+}
+
+/* Mobile portrait / small tablet */
+@media (max-width: 520px) {
+  .modal-overlay { padding:0; align-items:flex-end; }
+  .modal {
+    max-width:100%; width:100%;
+    max-height:92vh; max-height:92svh;
+    border-radius:20px 20px 0 0;
+    border-left:none; border-right:none; border-bottom:none;
+    transform:translateY(100%);
+  }
+  .modal-overlay.open .modal { transform:translateY(0); }
+  .modal::before,.modal::after { display:none; }
+  .modal-header { padding:16px 20px 14px; gap:12px; }
+  .modal-icon   { font-size:26px; }
+  .modal-name   { font-size:17px; }
+  .modal-phase  { font-size:8px; }
+  .modal-tagline{ font-size:10px; }
+  .modal-close  { top:14px; right:14px; width:30px; height:30px; font-size:14px; line-height:30px; }
+  .modal-body   { padding:14px 16px 24px; }
+  .modal-summary{ font-size:11px; padding:11px 14px; }
+  .cards-grid   { grid-template-columns:1fr; }
+  .card         { padding:12px; }
+  .card-desc    { font-size:10px; }
+  .kpi-val      { font-size:14px; }
+  .bp-list li   { font-size:10px; }
+  .modal-footer { gap:8px; }
+  .phase-btn    { padding:6px 12px; font-size:8px; }
+
+  /* drag handle */
+  .modal::before {
+    display:block;
+    top:8px; left:50%; transform:translateX(-50%);
+    width:36px; height:4px;
+    border:none; border-radius:2px;
+    background:rgba(255,255,255,.2); opacity:1;
+  }
+
+  .top-label { font-size:14px; letter-spacing:.15em; top:-38px; }
+  .hud       { bottom:-40px; font-size:8px; gap:8px; }
+  .hud-dot   { width:5px; height:5px; }
+  .corner    { display:none; }
+}
+
+/* Very small phones */
+@media (max-width: 360px) {
+  .top-label { font-size:12px; }
+  .hud       { gap:6px; font-size:7.5px; }
+}
+
+/* Landscape mobile — make scene smaller vertically */
+@media (max-height: 500px) and (orientation:landscape) {
+  .modal-overlay { padding:8px; align-items:center; }
+  .modal { max-height:96vh; border-radius:14px; }
+  .modal-header  { padding:12px 18px; }
+  .modal-name    { font-size:16px; }
+  .modal-body    { padding:12px 16px 16px; }
+}
+</style>
+</head>
+<body>
+
+<!-- cursor (desktop) -->
+<canvas id="cursorCanvas"></canvas>
+<div class="cursor-dot"  id="cursorDot"></div>
+<div class="cursor-ring" id="cursorRing"></div>
+
+<!-- background -->
+<div class="stars" id="stars"></div>
+<div class="grid"></div>
+<div class="scanlines"></div>
+<div class="key-hint">ESC · ← → NAVIGATE PHASES</div>
+
+<!-- ═══ SCENE WRAPPER (scaled by JS) ═══ -->
+<div class="scene-wrapper" id="sceneWrapper">
+  <div class="scene" id="scene">
+    <div class="top-label">DEV<span>OPS</span> LIFECYCLE Infinity Loop - Using Jenkins</div>
+    <div class="corner c-tl"></div><div class="corner c-tr"></div>
+    <div class="corner c-bl"></div><div class="corner c-br"></div>
+
+    <div class="ring-outer"></div>
+    <div class="ring-mid"></div>
+
+    <!-- SVG arcs + particles -->
+    <svg class="svg-canvas" viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="gs"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <linearGradient id="a01" gradientUnits="userSpaceOnUse" x1="320" y1="32"  x2="528" y2="152"><stop offset="0%" stop-color="#00f5ff"/><stop offset="100%" stop-color="#00ff88"/></linearGradient>
+        <linearGradient id="a12" gradientUnits="userSpaceOnUse" x1="528" y1="152" x2="528" y2="488"><stop offset="0%" stop-color="#00ff88"/><stop offset="100%" stop-color="#ff7c2a"/></linearGradient>
+        <linearGradient id="a23" gradientUnits="userSpaceOnUse" x1="528" y1="488" x2="320" y2="608"><stop offset="0%" stop-color="#ff7c2a"/><stop offset="100%" stop-color="#ffe843"/></linearGradient>
+        <linearGradient id="a34" gradientUnits="userSpaceOnUse" x1="320" y1="608" x2="112" y2="488"><stop offset="0%" stop-color="#ffe843"/><stop offset="100%" stop-color="#b96aff"/></linearGradient>
+        <linearGradient id="a45" gradientUnits="userSpaceOnUse" x1="112" y1="488" x2="112" y2="152"><stop offset="0%" stop-color="#b96aff"/><stop offset="100%" stop-color="#ff2d78"/></linearGradient>
+        <linearGradient id="a50" gradientUnits="userSpaceOnUse" x1="112" y1="152" x2="320" y2="32" ><stop offset="0%" stop-color="#ff2d78"/><stop offset="100%" stop-color="#00f5ff"/></linearGradient>
+        <marker id="m01" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#00ff88" opacity=".85"/></marker>
+        <marker id="m12" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#ff7c2a" opacity=".85"/></marker>
+        <marker id="m23" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#ffe843" opacity=".85"/></marker>
+        <marker id="m34" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#b96aff" opacity=".85"/></marker>
+        <marker id="m45" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#ff2d78" opacity=".85"/></marker>
+        <marker id="m50" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6Z" fill="#00f5ff" opacity=".85"/></marker>
+      </defs>
+      <!-- halos -->
+      <circle cx="320" cy="80"  r="52" fill="#00f5ff" opacity=".05" filter="url(#gs)"/>
+      <circle cx="528" cy="200" r="52" fill="#00ff88" opacity=".05" filter="url(#gs)"/>
+      <circle cx="528" cy="440" r="52" fill="#ff7c2a" opacity=".05" filter="url(#gs)"/>
+      <circle cx="320" cy="560" r="52" fill="#ffe843" opacity=".05" filter="url(#gs)"/>
+      <circle cx="112" cy="440" r="52" fill="#b96aff" opacity=".05" filter="url(#gs)"/>
+      <circle cx="112" cy="200" r="52" fill="#ff2d78" opacity=".05" filter="url(#gs)"/>
+      <!-- arcs -->
+      <path id="p01" d="M 356 98 A 240 240 0 0 1 510 218" fill="none" stroke="url(#a01)" stroke-width="2.5" stroke-linecap="round" marker-end="url(#m01)" filter="url(#glow)" opacity=".8"/>
+      <path id="p12" d="M 528 248 A 240 240 0 0 1 528 392" fill="none" stroke="url(#a12)" stroke-width="2.5" stroke-linecap="round" marker-end="url(#m12)" filter="url(#glow)" opacity=".8"/>
+      <path id="p23" d="M 510 458 A 240 240 0 0 1 356 542" fill="none" stroke="url(#a23)" stroke-width="2.5" stroke-linecap="round" marker-end="url(#m23)" filter="url(#glow)" opacity=".8"/>
+      <path id="p34" d="M 284 542 A 240 240 0 0 1 130 458" fill="none" stroke="url(#a34)" stroke-width="2.5" stroke-linecap="round" marker-end="url(#m34)" filter="url(#glow)" opacity=".8"/>
+      <path id="p45" d="M 112 392 A 240 240 0 0 1 112 248" fill="none" stroke="url(#a45)" stroke-width="2.5" stroke-linecap="round" marker-end="url(#m45)" filter="url(#glow)" opacity=".8"/>
+      <path id="p50" d="M 130 182 A 240 240 0 0 1 284 98"  fill="none" stroke="url(#a50)" stroke-width="2.5" stroke-linecap="round" marker-end="url(#m50)" filter="url(#glow)" opacity=".8"/>
+      <!-- particles -->
+      <circle r="4"   fill="#00f5ff" filter="url(#glow)" opacity=".95"><animateMotion dur="3s" repeatCount="indefinite" begin="0s"  ><mpath href="#p01"/></animateMotion></circle>
+      <circle r="2.5" fill="#00ff88" filter="url(#glow)" opacity=".7" ><animateMotion dur="3s" repeatCount="indefinite" begin="1.5s"><mpath href="#p01"/></animateMotion></circle>
+      <circle r="4"   fill="#ff7c2a" filter="url(#glow)" opacity=".95"><animateMotion dur="3s" repeatCount="indefinite" begin=".5s" ><mpath href="#p12"/></animateMotion></circle>
+      <circle r="2.5" fill="#00ff88" filter="url(#glow)" opacity=".7" ><animateMotion dur="3s" repeatCount="indefinite" begin="2s"  ><mpath href="#p12"/></animateMotion></circle>
+      <circle r="4"   fill="#ffe843" filter="url(#glow)" opacity=".95"><animateMotion dur="3s" repeatCount="indefinite" begin="1s"  ><mpath href="#p23"/></animateMotion></circle>
+      <circle r="2.5" fill="#ff7c2a" filter="url(#glow)" opacity=".7" ><animateMotion dur="3s" repeatCount="indefinite" begin="2.5s"><mpath href="#p23"/></animateMotion></circle>
+      <circle r="4"   fill="#b96aff" filter="url(#glow)" opacity=".95"><animateMotion dur="3s" repeatCount="indefinite" begin="1.5s"><mpath href="#p34"/></animateMotion></circle>
+      <circle r="2.5" fill="#ffe843" filter="url(#glow)" opacity=".7" ><animateMotion dur="3s" repeatCount="indefinite" begin="0s"  ><mpath href="#p34"/></animateMotion></circle>
+      <circle r="4"   fill="#ff2d78" filter="url(#glow)" opacity=".95"><animateMotion dur="3s" repeatCount="indefinite" begin="2s"  ><mpath href="#p45"/></animateMotion></circle>
+      <circle r="2.5" fill="#b96aff" filter="url(#glow)" opacity=".7" ><animateMotion dur="3s" repeatCount="indefinite" begin=".5s" ><mpath href="#p45"/></animateMotion></circle>
+      <circle r="4"   fill="#00f5ff" filter="url(#glow)" opacity=".95"><animateMotion dur="3s" repeatCount="indefinite" begin="2.5s"><mpath href="#p50"/></animateMotion></circle>
+      <circle r="2.5" fill="#ff2d78" filter="url(#glow)" opacity=".7" ><animateMotion dur="3s" repeatCount="indefinite" begin="1s"  ><mpath href="#p50"/></animateMotion></circle>
+      <polyline id="hb" points="" stroke="#00f5ff" stroke-width="1.5" fill="none" opacity=".4" filter="url(#glow)"/>
+    </svg>
+
+    <!-- nodes -->
+    <div class="node n-plan"    onclick="openModal('plan')">    <div class="node-inner"><div class="node-icon">📋</div><div class="node-label">Plan</div><div class="node-sub">Jira · Notion</div><div class="node-hint">◉ tap</div></div></div>
+    <div class="node n-code"    onclick="openModal('code')">    <div class="node-inner"><div class="node-icon">💻</div><div class="node-label">Code</div><div class="node-sub">Git · VS Code</div><div class="node-hint">◉ tap</div></div></div>
+    <div class="node n-build"   onclick="openModal('build')">   <div class="node-inner"><div class="node-icon">⚙️</div><div class="node-label">Build</div><div class="node-sub">Docker · Maven</div><div class="node-hint">◉ tap</div></div></div>
+    <div class="node n-test"    onclick="openModal('test')">    <div class="node-inner"><div class="node-icon">🧪</div><div class="node-label">Test</div><div class="node-sub">Jest · Selenium</div><div class="node-hint">◉ tap</div></div></div>
+    <div class="node n-deploy"  onclick="openModal('deploy')">  <div class="node-inner"><div class="node-icon">🚀</div><div class="node-label">Deploy</div><div class="node-sub">K8s · AWS</div><div class="node-hint">◉ tap</div></div></div>
+    <div class="node n-monitor" onclick="openModal('monitor')"> <div class="node-inner"><div class="node-icon">📡</div><div class="node-label">Monitor</div><div class="node-sub">Grafana · PD</div><div class="node-hint">◉ tap</div></div></div>
+
+    <!-- core -->
+    <div class="core" onclick="openModal('cicd')">
+      <div class="core-ring"></div>
+      <div class="core-ring"></div>
+      <div class="core-inner">
+        <div class="core-title">CI/CD</div>
+        <div class="core-sub">INFINITE LOOP</div>
+        <div class="core-hint">◉ tap</div>
+      </div>
+    </div>
+
+    <!-- HUD -->
+    <div class="hud">
+      <span><span class="hud-dot" style="background:var(--cyan)"></span>PLAN</span>
+      <span><span class="hud-dot" style="background:var(--green)"></span>CODE</span>
+      <span><span class="hud-dot" style="background:var(--orange)"></span>BUILD</span>
+      <span><span class="hud-dot" style="background:var(--yellow)"></span>TEST</span>
+      <span><span class="hud-dot" style="background:var(--purple)"></span>DEPLOY</span>
+      <span><span class="hud-dot" style="background:var(--pink)"></span>MONITOR</span>
+    </div>
+  </div><!-- /scene -->
+</div><!-- /scene-wrapper -->
+
+<!-- ═══ MODAL ═══ -->
+<div class="modal-overlay" id="overlay" onclick="handleOverlayClick(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <div class="modal-icon" id="mIcon">📋</div>
+      <div class="modal-titles">
+        <div class="modal-phase"   id="mPhase">PHASE 01</div>
+        <div class="modal-name"    id="mName">PLAN</div>
+        <div class="modal-tagline" id="mTagline">Define. Align. Prioritize.</div>
+      </div>
+    </div>
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-body" id="mBody"></div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════
+   DATA
+═══════════════════════════════════════ */
+const DATA = {
+  plan:{color:'#00f5ff',phase:'PHASE 01 — DEVOPS LIFECYCLE',icon:'📋',name:'PLAN',tagline:'Define. Align. Prioritize.',
+    summary:'Planning is the foundation of every DevOps cycle. Teams collaborate to define business requirements, break down features into trackable work items, estimate effort, assign priorities, and map dependencies — ensuring every sprint delivers measurable value aligned with business goals.',
+    sections:[
+      {title:'Core Concepts',type:'cards',items:[
+        {icon:'🎯',title:'Sprint Planning',  desc:'Break epics into user stories, assign story points, and define sprint goals using Scrum or Kanban frameworks.'},
+        {icon:'📐',title:'System Design',    desc:'Architect scalable solutions: ERDs, sequence diagrams, API contracts, and data flow blueprints reviewed by the team.'},
+        {icon:'📊',title:'Backlog Grooming', desc:'Continuously refine, reprioritize, and estimate the product backlog to keep teams aligned with evolving business needs.'},
+        {icon:'🤝',title:'Stakeholder Sync', desc:'OKRs, roadmap reviews, and release planning sessions ensure cross-functional alignment from day one of each cycle.'},
+      ]},
+      {title:'Key Activities',type:'bp',items:[
+        'Define acceptance criteria and Definition of Done (DoD) for every ticket before work begins',
+        'Conduct risk assessment and create mitigation strategies early in the planning phase',
+        'Record architecture decisions as ADRs (Architecture Decision Records) for future reference',
+        'Identify external dependencies: third-party APIs, compliance requirements, and SLAs',
+        'Estimate capacity using team velocity, sprint load calculation, and buffer for unplanned work',
+        'Set up end-to-end traceability: requirements → design → test cases → deployment tickets',
+      ]},
+      {title:'Tools & Platforms',type:'tools',items:['Jira','Linear','Notion','Confluence','Miro','Azure Boards','Trello','GitHub Projects','ProductBoard','Monday','Asana']},
+      {title:'Success Metrics',type:'kpis',items:[{val:'2 wks',lbl:'Sprint Cadence'},{val:'85%',lbl:'Velocity'},{val:'< 5%',lbl:'Scope Creep'},{val:'100%',lbl:'Coverage'}]},
+    ],prevKey:'monitor',nextKey:'code'},
+
+  code:{color:'#00ff88',phase:'PHASE 02 — DEVOPS LIFECYCLE',icon:'💻',name:'CODE',tagline:'Write. Review. Collaborate.',
+    summary:'The code phase transforms plans into working software. Developers follow engineering standards, use version control workflows, perform peer reviews, and maintain code quality through linting and static analysis — ensuring every commit is production-grade before it enters the pipeline.',
+    sections:[
+      {title:'Core Concepts',type:'cards',items:[
+        {icon:'🌿',title:'Branching Strategy',desc:'GitFlow, trunk-based development, or feature flags — keep main always deployable with minimal merge conflicts.'},
+        {icon:'🔍',title:'Code Review (PR)',  desc:'Pull request reviews enforce quality gates: correctness, security, readability, and architectural alignment.'},
+        {icon:'📦',title:'Clean Architecture',desc:'SOLID principles, DRY, separation of concerns, and domain-driven design keep codebases maintainable at scale.'},
+        {icon:'🔐',title:'Secrets Management',desc:'Never hardcode credentials. Use HashiCorp Vault, AWS Secrets Manager, or CI-injected env vars for sensitive values.'},
+      ]},
+      {title:'Engineering Practices',type:'bp',items:[
+        'Commit small, commit often — atomic commits with conventional messages (feat:, fix:, chore:)',
+        'Pre-commit hooks (Husky, lint-staged) enforce formatting and linting before every push',
+        'Write code alongside unit tests — TDD prevents regression debt from the very beginning',
+        'Use semantic versioning (semver) and auto-generated CHANGELOGs for all released artifacts',
+        'Conduct threat modelling and security code review (SAST) as part of every PR checklist',
+        'API-first design: define OpenAPI specs and generate both client SDKs and server stubs from them',
+      ]},
+      {title:'Tools & Platforms',type:'tools',items:['Git','GitHub','GitLab','Bitbucket','VS Code','IntelliJ','SonarQube','ESLint','Prettier','Husky','Snyk','CodeClimate']},
+      {title:'Success Metrics',type:'kpis',items:[{val:'< 24h',lbl:'PR Merge Time'},{val:'≥ 80%',lbl:'Coverage'},{val:'0',lbl:'Critical Vulns'},{val:'A',lbl:'Code Grade'}]},
+    ],prevKey:'plan',nextKey:'build'},
+
+  build:{color:'#ff7c2a',phase:'PHASE 03 — DEVOPS LIFECYCLE',icon:'⚙️',name:'BUILD',tagline:'Compile. Package. Containerize.',
+    summary:'The build phase transforms source code into immutable, versioned, deployable artifacts. Automated pipelines compile code, resolve dependencies, run static checks, package binaries or container images, and push them to registries — reproducibly and securely every single time.',
+    sections:[
+      {title:'Core Concepts',type:'cards',items:[
+        {icon:'🐳',title:'Containerization', desc:'Docker multi-stage builds produce lean, reproducible images. Layer caching ensures blazing-fast rebuilds on every commit.'},
+        {icon:'📦',title:'Artifact Registry',desc:'Push versioned images to ECR, Docker Hub, Nexus, or Artifactory with immutable semantic version tags per build.'},
+        {icon:'🔧',title:'Build Automation', desc:'Maven, Gradle, npm scripts, or Bazel orchestrate compilation, linting, testing, and packaging in a single command.'},
+        {icon:'⚡',title:'Build Caching',    desc:'Layer, dependency, and incremental caching (node_modules, .m2) cut pipeline execution time from minutes to seconds.'},
+      ]},
+      {title:'Build Pipeline Steps',type:'bp',items:[
+        'Checkout source → validate commit signatures and branch protection policies',
+        'Dependency installation with lockfile enforcement (npm ci, pip install --require-hashes)',
+        'Compile / transpile → generate production-optimised bundles or binaries with tree-shaking',
+        'Static analysis: SAST scan, licence compliance check, and dependency vulnerability audit',
+        'Unit test execution with hard coverage enforcement gates (fail the build if below threshold)',
+        'Build Docker image → push to registry with digest signing via Cosign for supply-chain security',
+        'Generate SBOM (Software Bill of Materials) and attach to artifact for full transparency',
+      ]},
+      {title:'Tools & Platforms',type:'tools',items:['Docker','Buildah','Maven','Gradle','Webpack','Vite','Bazel','GitHub Actions','Nexus','JFrog','Cosign','Trivy']},
+      {title:'Success Metrics',type:'kpis',items:[{val:'< 5m',lbl:'Build Time'},{val:'> 95%',lbl:'Success Rate'},{val:'100%',lbl:'Reproducible'},{val:'0',lbl:'Known CVEs'}]},
+    ],prevKey:'code',nextKey:'test'},
+
+  test:{color:'#ffe843',phase:'PHASE 04 — DEVOPS LIFECYCLE',icon:'🧪',name:'TEST',tagline:'Validate. Assert. Assure.',
+    summary:'Testing is the quality gateway that ensures every artifact reaching production is correct, performant, secure, and accessible. A mature strategy spans multiple layers — from millisecond unit tests to full end-to-end regression suites running in parallel on every build.',
+    sections:[
+      {title:'The Testing Pyramid',type:'cards',items:[
+        {icon:'⚡',title:'Unit Tests',        desc:'Isolated, fast tests for individual functions and components. Target 80%+ coverage. Run on every single commit.'},
+        {icon:'🔗',title:'Integration Tests', desc:'Verify interactions between modules, services, and databases. Use Docker Compose to spin up real dependencies in CI.'},
+        {icon:'🖥️',title:'E2E Tests',          desc:'Simulate real user journeys using Playwright or Cypress across browsers. Run on staging environment post-deploy.'},
+        {icon:'🏋️',title:'Performance Tests',  desc:'k6, JMeter, or Gatling stress-test critical paths. Enforce p99 latency budgets and throughput SLOs as gates.'},
+      ]},
+      {title:'Testing Disciplines',type:'bp',items:[
+        'Shift-left testing: write tests alongside features — prevent defects, not just detect them',
+        'Contract testing (Pact) validates API compatibility between microservices before full integration',
+        'Chaos engineering (Chaos Monkey, Gremlin) injects failures to validate system resilience',
+        'Accessibility testing (axe-core, Lighthouse) ensures WCAG 2.1 AA compliance on every release',
+        'Security testing: DAST scans (OWASP ZAP) run on the live application in a staging environment',
+        'Visual regression testing (Percy, Chromatic) catches unintended UI changes automatically in CI',
+      ]},
+      {title:'Tools & Platforms',type:'tools',items:['Jest','Vitest','Playwright','Cypress','Selenium','JUnit 5','PyTest','k6','JMeter','Pact','OWASP ZAP','Chromatic']},
+      {title:'Success Metrics',type:'kpis',items:[{val:'≥ 80%',lbl:'Coverage'},{val:'< 2m',lbl:'Unit Suite'},{val:'0',lbl:'P0 Defects'},{val:'> 99%',lbl:'Pass Rate'}]},
+    ],prevKey:'build',nextKey:'deploy'},
+
+  deploy:{color:'#b96aff',phase:'PHASE 05 — DEVOPS LIFECYCLE',icon:'🚀',name:'DEPLOY',tagline:'Release. Rollout. Validate.',
+    summary:'Deployment is the controlled delivery of validated artifacts into target environments. Modern deployments use progressive delivery strategies — blue/green, canary, feature flags — to release with zero downtime while maintaining the ability to instantly rollback on any anomaly.',
+    sections:[
+      {title:'Deployment Strategies',type:'cards',items:[
+        {icon:'🔵',title:'Blue / Green',   desc:'Two identical environments; traffic flips instantly. Zero downtime. Rollback is a single load-balancer config switch.'},
+        {icon:'🐤',title:'Canary Release', desc:'Route 5–10% of traffic to the new version. Monitor error rates and latency before gradually shifting to 100%.'},
+        {icon:'🚩',title:'Feature Flags',  desc:'Decouple deployment from release. Toggle features per user segment without redeploying — dark launches made easy.'},
+        {icon:'🔄',title:'Rolling Update', desc:'Replace pods incrementally. Kubernetes ensures min-available replicas always serve live traffic during updates.'},
+      ]},
+      {title:'Deployment Best Practices',type:'bp',items:[
+        'Infrastructure as Code (Terraform, Pulumi) provisions cloud resources reproducibly across all environments',
+        'GitOps (ArgoCD, Flux) — declare desired cluster state in Git; operators reconcile cluster continuously',
+        'Automated smoke tests run immediately post-deploy to validate health before full traffic switchover',
+        'Immutable infrastructure: never patch running containers — always redeploy fresh, versioned images',
+        'Secrets injected at runtime via Vault or AWS Secrets Manager — never baked into container images',
+        'Automated rollback triggered on SLO budget burn — traffic flips back automatically in under 60 seconds',
+      ]},
+      {title:'Tools & Platforms',type:'tools',items:['Kubernetes','Helm','ArgoCD','Flux','Terraform','Pulumi','Spinnaker','AWS CodeDeploy','LaunchDarkly','Vault','Istio','Crossplane']},
+      {title:'DORA Targets',type:'kpis',items:[{val:'≥ 4/wk',lbl:'Deploy Freq'},{val:'< 1h',lbl:'Lead Time'},{val:'< 1h',lbl:'MTTR'},{val:'< 5%',lbl:'Change Fail'}]},
+    ],prevKey:'test',nextKey:'monitor'},
+
+  monitor:{color:'#ff2d78',phase:'PHASE 06 — DEVOPS LIFECYCLE',icon:'📡',name:'MONITOR',tagline:'Observe. Alert. Improve.',
+    summary:'Monitoring closes the DevOps feedback loop. Full-stack observability — metrics, logs, distributed traces, and real user monitoring — gives teams the data to detect anomalies instantly, diagnose root causes precisely, meet SLOs reliably, and continuously improve reliability.',
+    sections:[
+      {title:'The Three Pillars',type:'cards',items:[
+        {icon:'📈',title:'Metrics',            desc:'Time-series data (Prometheus) tracks CPU, latency, error rate, and saturation — the four Golden Signals.'},
+        {icon:'📝',title:'Logs',               desc:'Structured JSON logs aggregated in Loki or Elasticsearch. Correlated with traces via trace-id injection.'},
+        {icon:'🔭',title:'Distributed Traces', desc:'OpenTelemetry + Jaeger traces requests across microservices, pinpointing latency bottlenecks precisely.'},
+        {icon:'👤',title:'Real User Monitoring',desc:'Capture Core Web Vitals, session replays (Sentry), and error boundaries from actual users in production.'},
+      ]},
+      {title:'Monitoring Practices',type:'bp',items:[
+        'Define SLIs (latency p99, availability %) and SLOs (99.9% uptime) with error budgets before launch',
+        'Alertmanager routing: on-call pages to PagerDuty only for budget-burning alerts — reduce noise',
+        'Dashboards as code (Grafonnet / Jsonnet) — version-controlled Grafana dashboards per service',
+        'Anomaly detection using ML-based baselines (Datadog Watchdog, Dynatrace AI) for predictive alerting',
+        'Runbooks linked directly from alert annotations — resolve incidents without tribal knowledge',
+        'Blameless post-incident retrospectives feed learnings back into planning as reliability improvements',
+      ]},
+      {title:'Tools & Platforms',type:'tools',items:['Prometheus','Grafana','Loki','Jaeger','OpenTelemetry','Datadog','New Relic','PagerDuty','Sentry','Elasticsearch','Dynatrace','CloudWatch']},
+      {title:'SRE Targets',type:'kpis',items:[{val:'99.9%',lbl:'Uptime SLO'},{val:'< 5m',lbl:'MTTD'},{val:'< 30m',lbl:'MTTR'},{val:'< 1%',lbl:'Error Rate'}]},
+    ],prevKey:'deploy',nextKey:'plan'},
+
+  cicd:{color:'#00f5ff',phase:'CORE ENGINE — DEVOPS',icon:'⚡',name:'CI / CD',tagline:'Integrate. Deliver. Continuously.',
+    summary:'CI/CD is the beating heart of DevOps. Continuous Integration automatically merges and validates every code change. Continuous Delivery ensures software is always deployable. Continuous Deployment pushes every passing build directly to production — fully automated.',
+    sections:[
+      {title:'The Three Pillars',type:'cards',items:[
+        {icon:'🔀',title:'Continuous Integration', desc:'Every commit triggers an automated pipeline: build → test → lint → security scan. Fast feedback in under 10 minutes.'},
+        {icon:'📬',title:'Continuous Delivery',    desc:'Every passing build is a release candidate. One-click (or automatic) promotion through Dev → Staging → Production.'},
+        {icon:'🤖',title:'Continuous Deployment',  desc:'No human approval required. 100% automated path to production. Requires mature testing and instant rollback.'},
+        {icon:'🛡️',title:'Pipeline as Code',       desc:'Pipelines defined in YAML and versioned in Git alongside application code — no more snowflake CI configurations.'},
+      ]},
+      {title:'Core CI/CD Concepts',type:'bp',items:[
+        'The main branch is always deployable — feature branches merge only after all automated gates pass',
+        'Pipeline stages: source → build → test → security scan → staging deploy → smoke test → production',
+        'Parallel stages: run unit, integration, and SAST scans simultaneously to minimise elapsed time',
+        'Environment promotion: the same artifact flows Dev → QA → Staging → Prod — zero rebuilds',
+        'Automated rollback: if post-deploy error rate exceeds threshold, traffic flips back in under 60s',
+        'Pipeline metrics: measure all four DORA metrics and display them on team dashboards with trends',
+        'GitOps model: Git is the single source of truth for both application code and infrastructure state',
+      ]},
+      {title:'Platforms & Tools',type:'tools',items:['GitHub Actions','GitLab CI','Jenkins','CircleCI','ArgoCD','Tekton','Drone CI','AWS CodePipeline','Azure DevOps','Harness','Spinnaker','TeamCity']},
+      {title:'DORA Elite Targets',type:'kpis',items:[{val:'Elite',lbl:'Deploy Freq'},{val:'< 1h',lbl:'Lead Time'},{val:'< 1h',lbl:'MTTR'},{val:'< 5%',lbl:'Change Fail %'}]},
+    ],prevKey:null,nextKey:null},
+};
+
+/* ═══════════════════════════════════════
+   RESPONSIVE SCENE SCALING
+═══════════════════════════════════════ */
+const SCENE_W = 640, SCENE_H = 640;
+const SCENE_PAD_V = 110; // top-label + hud combined height
+const SCENE_PAD_H = 32;
+
+function scaleScene() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const scaleX = (vw - SCENE_PAD_H) / SCENE_W;
+  const scaleY = (vh - SCENE_PAD_V) / SCENE_H;
+  const s = Math.min(scaleX, scaleY, 1); // never upscale past 1
+  const wrapper = document.getElementById('sceneWrapper');
+  wrapper.style.transform = `scale(${s})`;
+  wrapper.style.width  = SCENE_W + 'px';
+  wrapper.style.height = SCENE_H + 'px';
+}
+scaleScene();
+window.addEventListener('resize', scaleScene);
+
+/* ═══════════════════════════════════════
+   MODAL ENGINE
+═══════════════════════════════════════ */
+let currentKey = null;
+
+function buildBody(d) {
+  const sections = d.sections.map(s => {
+    let inner = '';
+    if (s.type === 'cards') {
+      inner = `<div class="cards-grid">${s.items.map(c=>`<div class="card"><div class="card-icon">${c.icon}</div><div class="card-title">${c.title}</div><div class="card-desc">${c.desc}</div></div>`).join('')}</div>`;
+    } else if (s.type === 'bp') {
+      inner = `<ul class="bp-list">${s.items.map(i=>`<li>${i}</li>`).join('')}</ul>`;
+    } else if (s.type === 'tools') {
+      inner = `<div class="tools-row">${s.items.map(t=>`<span class="tool-pill">${t}</span>`).join('')}</div>`;
+    } else if (s.type === 'kpis') {
+      inner = `<div class="kpi-strip">${s.items.map(k=>`<div class="kpi"><div class="kpi-val">${k.val}</div><div class="kpi-lbl">${k.lbl}</div></div>`).join('')}</div>`;
+    }
+    return `<div class="modal-section-title">${s.title}</div>${inner}`;
+  }).join('');
+
+  const nav = `<div class="modal-footer"><span class="badge">${d.name}</span><div class="phase-nav">${d.prevKey?`<button class="phase-btn" onclick="openModal('${d.prevKey}')">← ${DATA[d.prevKey].name}</button>`:''} ${d.nextKey?`<button class="phase-btn" onclick="openModal('${d.nextKey}')">${DATA[d.nextKey].name} →</button>`:''}</div></div>`;
+  const swipe = (d.prevKey||d.nextKey) ? `<div class="swipe-hint">swipe or use ← → to navigate phases</div>` : '';
+  return sections + nav + swipe;
+}
+
+function openModal(key) {
+  const d = DATA[key]; currentKey = key;
+  const modal = document.getElementById('modal');
+  modal.style.setProperty('--mc', d.color);
+  document.getElementById('mIcon').textContent    = d.icon;
+  document.getElementById('mPhase').textContent   = d.phase;
+  document.getElementById('mName').textContent    = d.name;
+  document.getElementById('mTagline').textContent = d.tagline;
+  document.getElementById('mBody').innerHTML      = `<div class="modal-summary">${d.summary}</div>` + buildBody(d);
+  document.getElementById('overlay').classList.add('open');
+  document.getElementById('mBody').scrollTop = 0;
+  document.querySelectorAll('.node').forEach(n => n.classList.remove('active-node'));
+  const el = document.querySelector('.n-' + key);
+  if (el) el.classList.add('active-node');
+}
+
+function closeModal() {
+  document.getElementById('overlay').classList.remove('open');
+  document.querySelectorAll('.node').forEach(n => n.classList.remove('active-node'));
+  currentKey = null;
+}
+
+function handleOverlayClick(e) {
+  if (e.target === document.getElementById('overlay')) closeModal();
+}
+
+// keyboard
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+  if (!currentKey) return;
+  if (e.key === 'ArrowRight' && DATA[currentKey].nextKey) openModal(DATA[currentKey].nextKey);
+  if (e.key === 'ArrowLeft'  && DATA[currentKey].prevKey) openModal(DATA[currentKey].prevKey);
+});
+
+// touch swipe to navigate / close on mobile
+let touchStartX = 0, touchStartY = 0;
+document.getElementById('modal').addEventListener('touchstart', e => {
+  touchStartX = e.changedTouches[0].clientX;
+  touchStartY = e.changedTouches[0].clientY;
+}, {passive:true});
+document.getElementById('modal').addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  if (Math.abs(dy) > Math.abs(dx)) {
+    // swipe down to close (on mobile bottom-sheet)
+    if (dy > 60) closeModal();
+    return;
+  }
+  if (Math.abs(dx) < 50 || !currentKey) return;
+  if (dx < 0 && DATA[currentKey].nextKey) openModal(DATA[currentKey].nextKey); // swipe left → next
+  if (dx > 0 && DATA[currentKey].prevKey) openModal(DATA[currentKey].prevKey); // swipe right → prev
+}, {passive:true});
+
+/* ═══════════════════════════════════════
+   STAR FIELD
+═══════════════════════════════════════ */
+const starsEl  = document.getElementById('stars');
+const starObjs = [];
+for (let i = 0; i < 180; i++) {
+  const s = document.createElement('div'); s.className = 'star';
+  const sz = Math.random()*2.5+.4, ox = Math.random()*window.innerWidth, oy = Math.random()*window.innerHeight;
+  s.style.cssText = `width:${sz}px;height:${sz}px;top:${oy}px;left:${ox}px;--d:${(Math.random()*4+2).toFixed(1)}s;animation-delay:${(Math.random()*5).toFixed(2)}s;opacity:${(Math.random()*.35+.08).toFixed(2)};transition:transform .6s ease-out;`;
+  starsEl.appendChild(s); starObjs.push({el:s, ox, oy});
+}
+
+/* ═══════════════════════════════════════
+   CURSOR + CANVAS (desktop mouse only)
+═══════════════════════════════════════ */
+const dot    = document.getElementById('cursorDot');
+const ring   = document.getElementById('cursorRing');
+const canvas = document.getElementById('cursorCanvas');
+const ctx    = canvas.getContext('2d');
+const COLORS = ['#00f5ff','#00ff88','#b96aff','#ff7c2a','#ff2d78','#ffe843'];
+
+let mx = innerWidth/2, my = innerHeight/2, rx = mx, ry = my;
+let hasMouse = false;
+
+function resize(){ canvas.width=innerWidth; canvas.height=innerHeight; }
+resize(); window.addEventListener('resize', resize);
+
+document.addEventListener('mousemove', e => {
+  if (!hasMouse) { hasMouse = true; document.body.classList.add('has-mouse'); }
+  mx = e.clientX; my = e.clientY;
+  dot.style.left = mx+'px'; dot.style.top = my+'px';
+  starObjs.forEach(({el,ox,oy}) => {
+    const dx=ox-mx,dy=oy-my,d=Math.sqrt(dx*dx+dy*dy);
+    if(d<110){const f=(110-d)/110,p=f*55;el.style.transform=`translate(${(dx/d)*p}px,${(dy/d)*p}px)`;el.style.opacity=0.06+f*.65;}
+    else el.style.transform='translate(0,0)';
+  });
+}, {passive:true});
+
+(function lr(){ rx+=(mx-rx)*.1;ry+=(my-ry)*.1;ring.style.left=rx+'px';ring.style.top=ry+'px';requestAnimationFrame(lr); })();
+
+const trail=[], sparks=[];
+const CNODES = Array.from({length:50},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight,vx:(Math.random()-.5)*.38,vy:(Math.random()-.5)*.38,r:Math.random()*2+1,color:COLORS[~~(Math.random()*COLORS.length)],a:Math.random()*.35+.1}));
+
+document.addEventListener('click', e => {
+  if (!hasMouse) return;
+  if (e.target.closest('.modal,.modal-overlay')) return;
+  for(let i=0;i<20;i++){const ang=Math.random()*Math.PI*2,spd=Math.random()*5+2;sparks.push({x:e.clientX,y:e.clientY,vx:Math.cos(ang)*spd,vy:Math.sin(ang)*spd,life:1,decay:Math.random()*.03+.02,r:Math.random()*3+1,color:COLORS[~~(Math.random()*COLORS.length)]});}
+});
+
+(function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if (!hasMouse) { requestAnimationFrame(draw); return; }
+
+  CNODES.forEach(n=>{
+    n.x+=n.vx;n.y+=n.vy;
+    if(n.x<0)n.x=canvas.width;if(n.x>canvas.width)n.x=0;
+    if(n.y<0)n.y=canvas.height;if(n.y>canvas.height)n.y=0;
+    const dx=n.x-mx,dy=n.y-my,d=Math.sqrt(dx*dx+dy*dy);
+    ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,Math.PI*2);
+    ctx.fillStyle=n.color;ctx.globalAlpha=d<180?Math.min(1,n.a+(1-d/180)*.65):n.a;ctx.fill();
+  });
+  ctx.globalAlpha=1;
+  for(let i=0;i<CNODES.length;i++){
+    const a=CNODES[i],cdx=a.x-mx,cdy=a.y-my,cd=Math.sqrt(cdx*cdx+cdy*cdy);
+    if(cd<150){const g=ctx.createLinearGradient(a.x,a.y,mx,my);g.addColorStop(0,a.color);g.addColorStop(1,'#00f5ff');ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(mx,my);ctx.strokeStyle=g;ctx.lineWidth=.8;ctx.globalAlpha=(1-cd/150)*.5;ctx.stroke();}
+    for(let j=i+1;j<CNODES.length;j++){const b=CNODES[j],ndx=a.x-b.x,ndy=a.y-b.y,nd=Math.sqrt(ndx*ndx+ndy*ndy);if(nd<85){ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.strokeStyle='#00f5ff';ctx.lineWidth=.45;ctx.globalAlpha=(1-nd/85)*.18;ctx.stroke();}}
+  }
+  trail.push({x:mx,y:my,life:1,color:COLORS[~~(Date.now()/110)%COLORS.length]});
+  if(trail.length>80)trail.shift();
+  for(let i=1;i<trail.length;i++){const p=trail[i-1],q=trail[i];ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.strokeStyle=q.color;ctx.lineWidth=(i/trail.length)*2.4;ctx.globalAlpha=(i/trail.length)*q.life*.62;ctx.lineCap='round';ctx.stroke();q.life-=.012;}
+  for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];s.x+=s.vx;s.y+=s.vy;s.vx*=.93;s.vy*=.93;s.life-=s.decay;if(s.life<=0){sparks.splice(i,1);continue;}const g=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,s.r*3);g.addColorStop(0,s.color);g.addColorStop(1,'transparent');ctx.beginPath();ctx.arc(s.x,s.y,s.r*(2-s.life),0,Math.PI*2);ctx.fillStyle=g;ctx.globalAlpha=s.life;ctx.fill();}
+  ctx.globalAlpha=1; requestAnimationFrame(draw);
+})();
+
+/* ═══════════════════════════════════════
+   HEARTBEAT SVG POLYLINE
+═══════════════════════════════════════ */
+const hb = document.getElementById('hb'); let t = 0;
+(function beat(){
+  t+=.04; const pts=[];
+  for(let x=0;x<=640;x+=4){
+    const ph=(x/640)*Math.PI*6+t;
+    let y=632-8*Math.sin(ph)*Math.exp(-Math.pow((x/640-.5)*2,2));
+    if(Math.abs(x-((t*60)%640))<8) y-=22;
+    pts.push(`${x},${y}`);
+  }
+  hb.setAttribute('points',pts.join(' ')); requestAnimationFrame(beat);
+})();
+</script>
+</body>
+</html>
