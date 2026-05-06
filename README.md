@@ -316,7 +316,7 @@ git push https://YOUR_AZURE_USERNAME:YOUR_AZURE_PASSWORD@YOUR_SCM_URI:443/YOUR_A
 
 **Example with real values:**
 ```bash
-git push https://harshjadeja_admin:Jenkins123@devops-myapp.scm.centralindia-01.azurewebsites.net:443/DevOps-MyApp.git HEAD:refs/heads/main --force
+git push https://xyz_admin:xyz123@devops-myapp.scm.centralindia-01.azurewebsites.net:443/DevOps-MyApp.git HEAD:refs/heads/main --force
 ```
 
 > 💡 **Why `refs/heads/main`?** When pushing to a brand new, empty Azure Git repository for the first time, you must use the full Git refname (`HEAD:refs/heads/main`). Using just `HEAD:main` will fail with: `The destination you provided is not a full refname`. After the first successful push, both formats work.
